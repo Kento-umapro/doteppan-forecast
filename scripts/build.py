@@ -226,12 +226,19 @@ for code in SHOPS:
 
 
 def predict(code, date):
-    """(予測売上, 平常比, 効いた要因) を返す。平常比は「その時期のその曜日の平常＝1.00」"""
+    """(予測売上, 平常比, 効いた要因) を返す。
+
+    祝日・年末年始・お盆・休前日は「その日の平常」の側に入れる。カレンダーを見れば分かる
+    ことを要因として並べても仕方がないため。平常比が動くのは、祭り・展示会・コンベンション
+    といった外の催しがあるときだけになる。
+    """
     m = models[code]
     d = dt.date.fromisoformat(date)
     base = m["level"] * m["dow"][d.weekday()] * MONTH[d.month]
+    for tag, *_ in calendar_tags(date):
+        base *= m["coef"].get(tag, 1.0)
     idx, why = 1.0, []
-    for tag, name, prior, note in day_tags(code, date):
+    for tag, name, prior, note in shop_events(code, date):
         c = m["coef"].get(tag, prior or 1.0)
         idx *= c
         why.append({"tag": tag, "name": name, "coef": round(c, 2), "n": m["nobs"].get(tag, 0), "note": note})
@@ -273,6 +280,8 @@ for d in daterange(LAST - dt.timedelta(89), LAST):
             continue
         m = models[code]
         base = m["base_of"](date)
+        for tag, *_ in calendar_tags(date):
+            base *= m["coef"].get(tag, 1.0)
         e["shops"][code] = {"lvl": round(x["sales"] / m["median"] * 100), "idx": round(x["sales"] / base, 3)}
     if e["shops"]:
         hist.append(e)

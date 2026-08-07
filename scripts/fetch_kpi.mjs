@@ -90,7 +90,7 @@ for (const s of shops) {
       });
       for (const r of d.dailyShopBusinessKpi?.dailyShopBusinessKpi ?? []) {
         if (!r.totalTaxIncludedAmount) continue;
-        rows.push({ code: s.code, date: r.businessDate, sales: r.totalTaxIncludedAmount, people: r.numPeople ?? 0, weather: r.weatherCondition ?? null });
+        rows.push({ code: s.code, date: r.businessDate, sales: r.totalTaxIncludedAmount, people: r.numPeople ?? 0, weather: r.weatherCondition ?? null, target: r.salesTargetAmount ?? null });
       }
     } catch (err) {
       console.log(`  !! ${s.name} ${a}: ${String(err.message).slice(0, 120)}`);

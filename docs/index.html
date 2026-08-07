@@ -107,7 +107,7 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 <nav id="shops"></nav>
 
 <div class="toolbar">
-  <label><input type="checkbox" id="onlyNotable" checked> 動きのある日だけ表示</label>
+  <label><input type="checkbox" id="onlyNotable" checked> 催しで動く日だけ表示</label>
   <span id="count"></span>
 </div>
 
@@ -123,7 +123,8 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 </table></div>
 
 <footer>
-  <div>ダイニーの日別実績を毎朝読み込んで、曜日・季節・祝日・近隣の催しから翌日以降60日ぶんを予測しています。係数は毎日学習し直しているので、実績が貯まるほど当たるようになります。</div>
+  <div>ダイニーの日別実績を毎朝読み込んで、翌日以降60日ぶんを予測しています。係数は毎日学習し直しているので、実績が貯まるほど当たるようになります。</div>
+  <div><b>平常比</b>が動くのは、祭り・展示会・コンベンションなど<b>外の催し</b>があるときだけです。曜日・季節・祝日・連休・お盆は「その日の平常」の側に織り込んであります（カレンダーを見れば分かることなので要因には出しません）。祝日そのものの上振れは<b>水準</b>の数字に出ます。</div>
   <div>売上の金額はこのページには出しません（平常を1.00とした指数と、普段の平均日を100とした水準だけ）。実額はダイニーで確認してください。</div>
   <div id="built"></div>
 </footer>
@@ -153,7 +154,7 @@ function dayCard(d, code){
                    : (w.n < 4 ? `<span class="weak">（実績${w.n}回）</span>` : '');
         return `${w.name}${weak}`;
       }).join('<br>')
-    : '<span class="none">特に材料なし</span>';
+    : '<span class="none">近隣に催しなし</span>';
   const w = Math.max(3, Math.min(100, s.lvl / 3));
   return `<div class="day ${cls}${d.date === todayJST() ? ' today' : ''}">
     <div class="d-date">${d.date.slice(5).replace('-', '/')}<small class="${wd}">${WD[d.w]}${d.hol ? '・祝' : ''}</small></div>
@@ -167,9 +168,9 @@ function render(){
   const only = document.getElementById('onlyNotable').checked;
   const list = F.days.filter(d => d.shops[current] && (!only || d.shops[current].rank !== 'flat'));
   document.getElementById('days').innerHTML = list.map(d => dayCard(d, current)).join('')
-    || `<div class="note">この先${F.days.length}日、平常から外れそうな日はありません。チェックを外すと全日ぶん出ます。</div>`;
+    || `<div class="note">この先${F.days.length}日、催しで平常から外れそうな日はありません。チェックを外すと全日ぶん出ます。</div>`;
   document.getElementById('count').textContent =
-    `${list.length}日を表示中（${only ? `平常どおりの${F.days.length - list.length}日は非表示` : `${F.days.length}日ぶん`}）`;
+    `${list.length}日を表示中（${only ? `催しのない${F.days.length - list.length}日は非表示` : `${F.days.length}日ぶん`}）`;
 
   const evs = F.events.filter(e => e.shops.includes(current));
   document.getElementById('evs').innerHTML = evs.map(e => {
