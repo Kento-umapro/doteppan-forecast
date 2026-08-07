@@ -44,12 +44,20 @@ def calendar_tags(d):
     elif "08-13" <= md <= "08-16":
         out.append(("obon", "お盆", None, None))
     elif d in HOLIDAYS:
-        out.append(("holiday", "祝日", None, None))
+        # 翌日も休みの祝日と、連休の最終日（翌日から仕事）はまるで別物。実測で2.13倍と1.60倍。
+        if is_off((dt.date.fromisoformat(d) + dt.timedelta(1)).isoformat()):
+            out.append(("holiday", "祝日（翌日も休み）", None, None))
+        else:
+            out.append(("holiday-last", "祝日（翌日から仕事）", None, None))
     else:
         nxt = (dt.date.fromisoformat(d) + dt.timedelta(1)).isoformat()
         if dt.date.fromisoformat(d).weekday() <= 3 and nxt in HOLIDAYS:
             out.append(("hol-eve", "翌日が祝日（休前日）", None, None))
     return out
+
+
+def is_off(d):
+    return d in HOLIDAYS or dt.date.fromisoformat(d).weekday() >= 5
 
 
 DOW_CLASS = ["月〜木", "月〜木", "月〜木", "月〜木", "金", "土日", "土日"]
