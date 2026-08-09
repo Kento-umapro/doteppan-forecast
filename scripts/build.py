@@ -165,7 +165,7 @@ def fit(metric):
         # 曜日・水準・イベント係数はお互いに絡んでいる（月島は9割の日に何かの展示会が当たっている
         # ので「イベントの無い日」だけを基準にすると水準が沈む）。順番に決めず、3周まわして
         # 互いに引き算しながら収束させる。
-        coef, nobs = {}, {}
+        coef, nobs, pos = {}, {}, {}
         dow = {w: 1.0 for w in range(7)}
         lvl_cache, level, base_of = {}, None, None
 
@@ -225,16 +225,18 @@ def fit(metric):
             c_fam = {fam: shrink([v for t, g in tag_r.items() if t.startswith(fam + "@") for v in g], c_all, 12)
                      for fam in BS_RANK}
 
-            coef, nobs = {}, {}
+            coef, nobs, pos = {}, {}, {}
             for tag in set(list(tag_r.keys()) + list(priors.keys())):
                 obs = tag_r.get(tag, [])
                 fam = tag.split("@")[0]
                 prior = c_fam[fam] if fam in BS_RANK else priors.get(tag, 1.0)
                 coef[tag] = min(2.5, max(0.4, shrink(obs, prior, 12 if fam in BS_RANK else SHRINK)))
                 nobs[tag] = len(obs)
+                # その催しの日のうち、実際に平常を上回った日の割合（数字のあやを弾くのに使う）
+                pos[tag] = (sum(1 for r in obs if r > 1) / len(obs)) if obs else None
 
         models[code] = {
-            "level": level, "dow": dow, "coef": coef, "nobs": nobs, "base_of": base_of,
+            "level": level, "dow": dow, "coef": coef, "nobs": nobs, "pos": pos, "base_of": base_of,
             "month": MONTH,
             "median": st.median([x[metric] for x in days.values()]),
             "days": len(days),
@@ -245,6 +247,28 @@ def fit(metric):
 models = fit("sales")
 pmodels = fit("people")
 MONTH = models[next(iter(models))]["month"] if models else {m: 1.0 for m in range(1, 13)}
+
+
+NEUTRAL = 0.05   # 平常比±5%以内しか動かないものは、誤差と区別がつかない
+
+
+def effective(m, tag, prior):
+    """その催しの効果として採用してよい係数を返す。採用できないときは 1.0。
+
+    ・±5%以内しか動かないもの … 誤差の範囲
+    ・実績3日以上あるのに、その半分未満でしか効果の向きが一致しないもの … 数字のあやとみる
+    実績ゼロ（手入力の暫定値）はそのまま通す。ページ側で「暫定」と明示しているため。
+    """
+    c = m["coef"].get(tag, prior or 1.0)
+    n = m["nobs"].get(tag, 0)
+    if n == 0:
+        return c
+    if abs(c - 1) < NEUTRAL:
+        return 1.0
+    p = (m.get("pos") or {}).get(tag)
+    if n >= 3 and p is not None and ((c > 1 and p < 0.5) or (c < 1 and p > 0.5)):
+        return 1.0
+    return c
 
 
 def predict_with(mods, code, date):
@@ -261,7 +285,9 @@ def predict_with(mods, code, date):
         base *= m["coef"].get(tag, 1.0)
     idx, why = 1.0, []
     for tag, name, prior, note in shop_events(code, date):
-        c = m["coef"].get(tag, prior or 1.0)
+        c = effective(m, tag, prior)
+        if c == 1.0:
+            continue   # 効果があるとは言えないものは、理由としても出さない
         idx *= c
         why.append({"tag": tag, "name": name, "coef": round(c, 2), "n": m["nobs"].get(tag, 0), "note": note})
     return base * idx, idx, base, why
@@ -425,7 +451,7 @@ for e in EVENTS:
         # 会期の初日に実際に付くタグ（展示会は曜日区分ごとに別係数）を代表として見せる
         rep = next((t for t, *_ in shop_events(c, max(e["from"], start.isoformat()) if e["to"] >= start.isoformat() else e["from"])
                     if t.startswith(e["tag"])), e["tag"])
-        learned[c] = {"coef": round(models[c]["coef"].get(rep, e.get("prior") or 1.0), 2),
+        learned[c] = {"coef": round(effective(models[c], rep, e.get("prior")), 2),
                       "n": models[c]["nobs"].get(rep, 0)}
     upcoming.append({**{k: e[k] for k in ("from", "to", "tag", "name") if k in e},
                      "shops": [c for c in tgt if c in models],
