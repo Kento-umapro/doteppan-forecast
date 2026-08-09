@@ -41,11 +41,32 @@ h1{margin:0; font-size:21px; font-weight:700; letter-spacing:-.01em}
 .tab{display:inline-block; font-size:12.5px; color:var(--accent); text-decoration:none; border-bottom:1px solid currentColor; padding-bottom:1px}
 .tab:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
 
-nav{display:flex; gap:6px; overflow-x:auto; padding:10px 0 14px; margin:0 -16px; padding-left:16px; padding-right:16px; scrollbar-width:none}
+nav{display:flex; gap:6px; align-items:flex-end; overflow-x:auto; padding:34px 16px 14px; margin:0 -16px; scrollbar-width:none}
 nav::-webkit-scrollbar{display:none}
+.sw{position:relative; flex:none; display:flex}
 nav button{
   flex:none; border:1px solid var(--line); background:var(--card); color:var(--sub);
   border-radius:999px; padding:7px 14px; font-size:13px; font-family:inherit; cursor:pointer; white-space:nowrap;
+}
+/* 近日中に動く店だけ、タブの上に吹き出しを出す */
+.bub{
+  position:absolute; bottom:calc(100% + 7px); left:50%; transform:translateX(-50%);
+  white-space:nowrap; font-size:10.5px; font-weight:700; line-height:1.5;
+  padding:2px 8px; border-radius:6px; pointer-events:none;
+  background:var(--up2); color:#fff; box-shadow:var(--shadow);
+}
+.bub::after{
+  content:''; position:absolute; top:100%; left:50%; transform:translateX(-50%);
+  border:5px solid transparent; border-top-color:var(--up2); border-bottom:0;
+}
+.bub.down{background:var(--dn2)}
+.bub.down::after{border-top-color:var(--dn2)}
+.bub small{font-weight:600; opacity:.85; font-size:10px}
+/* ダークでは地の色が明るくなるので、文字は白ではなく地の濃い色にする */
+@media (prefers-color-scheme:dark){ .bub{color:#0b1210} }
+@media (prefers-reduced-motion:no-preference){
+  .bub{animation:bubin .35s ease-out both}
+  @keyframes bubin{from{opacity:0; transform:translateX(-50%) translateY(3px)} to{opacity:1; transform:translateX(-50%) translateY(0)}}
 }
 nav button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
 nav button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
@@ -150,6 +171,22 @@ function pct(idx){
   return p > 0 ? `+${p}%` : `${p}%`;
 }
 
+/** 近日（14日以内）で平常から外れる日を拾って、タブの上の吹き出しにする */
+function bubbleFor(code){
+  const from = todayJST();
+  const to = new Date(Date.parse(from) + 13 * 864e5).toISOString().slice(0, 10);
+  const hits = F.days.filter(d => d.date >= from && d.date <= to
+    && d.shops[code] && d.shops[code].rank !== 'flat');
+  if (!hits.length) return '';
+  const first = hits[0], s = first.shops[code];
+  const up = s.idx > 1;
+  const dl = (s.ppl != null && s.pplBase != null) ? s.ppl - s.pplBase : null;
+  const amount = dl ? `${up ? '＋' : '−'}${Math.abs(dl)}人` : pct(s.idx);
+  const more = hits.length > 1 ? `<small> ほか${hits.length - 1}日</small>` : '';
+  const md = `${+first.date.slice(5, 7)}/${+first.date.slice(8, 10)}`;
+  return `<span class="bub${up ? '' : ' down'}">${md} ${amount}${more}</span>`;
+}
+
 function dayCard(d, code){
   const s = d.shops[code];
   if (!s) return '';
@@ -214,6 +251,9 @@ function renderAccuracy(){
 function pickShop(code){
   current = code;
   [...document.querySelectorAll('#shops button')].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.code === code)));
+  // スマホだとタブが画面外にはみ出す。選んでいる店（＝吹き出し）が見えるところまで寄せる
+  const sel = document.querySelector(`#shops button[data-code="${code}"]`);
+  if (sel) sel.scrollIntoView({ inline: 'center', block: 'nearest', behavior: 'smooth' });
   localStorage.setItem('doteppan-forecast-shop', code);
   render();
   renderAccuracy();
@@ -236,12 +276,17 @@ function pickShop(code){
     `実績は <b>${F.actualThrough}</b> まで反映 ／ 予測は <b>${F.days[0].date}</b> から${F.days.length}日先まで`;
   document.getElementById('built').textContent = `最終更新 ${new Date(F.generatedAt).toLocaleString('ja-JP')}`;
   document.getElementById('shops').innerHTML = F.shops
-    .map(s => `<button data-code="${s.code}" aria-pressed="false">${s.name}</button>`).join('');
+    .map(s => `<span class="sw">${bubbleFor(s.code)}<button data-code="${s.code}" aria-pressed="false">${s.name}</button></span>`).join('');
   document.querySelectorAll('#shops button').forEach(b => b.onclick = () => pickShop(b.dataset.code));
   document.getElementById('onlyNotable').onchange = render;
   const saved = localStorage.getItem('doteppan-forecast-shop');
   const first = F.shops.some(s => s.code === '001000') ? '001000' : F.shops[0].code;
   pickShop(F.shops.some(s => s.code === saved) ? saved : first);
+  // 初回描画では smooth が効かないブラウザがあるので、位置だけ確実に合わせ直す
+  requestAnimationFrame(() => {
+    const sel = document.querySelector('#shops button[aria-pressed="true"]');
+    if (sel) sel.scrollIntoView({ inline: 'center', block: 'nearest' });
+  });
 })();
 </script>
 </body>

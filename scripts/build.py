@@ -27,10 +27,10 @@ HOLIDAYS = set(cfg["holidays"])
 EVENTS = cfg["events"]
 
 kpi = json.loads((CACHE / "kpi.json").read_text(encoding="utf-8"))
-rows = [r for r in kpi["rows"] if r["code"] in SHOPS and r["sales"] > 0]
-today = dt.date.fromisoformat(max(r["date"] for r in rows)) if rows else dt.date.today()
 # 当日ぶんは営業中で数字が締まっていないので、実績としては前日までを使う
-LAST = today
+TODAY_JST = (dt.datetime.now(dt.timezone.utc) + dt.timedelta(hours=9)).date().isoformat()
+rows = [r for r in kpi["rows"] if r["code"] in SHOPS and r["sales"] > 0 and r["date"] < TODAY_JST]
+LAST = dt.date.fromisoformat(max(r["date"] for r in rows)) if rows else dt.date.today()
 
 # ---------------------------------------------------------------- 暦とイベントの展開
 def calendar_tags(d):
