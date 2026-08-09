@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>どてっぱん 売上予報｜答え合わせ</title>
+<style>
+:root{
+  --bg:#f6f7f5; --card:#ffffff; --ink:#14181a; --sub:#69736f; --line:#dde2df;
+  --accent:#1c6f57;
+  --hit:#146a45; --hitbg:#e2f0e8;
+  --near:#96661c; --nearbg:#f7f0e2;
+  --miss:#a3402b; --missbg:#f8e9e5;
+  --shadow:0 1px 2px rgba(20,24,26,.05), 0 10px 30px -22px rgba(20,24,26,.5);
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0e1211; --card:#161b1a; --ink:#e8edea; --sub:#8d9b95; --line:#252d2b;
+    --accent:#4fb99a;
+    --hit:#5fc394; --hitbg:#12291f;
+    --near:#d7a94f; --nearbg:#2a2113;
+    --miss:#e08069; --missbg:#2c1a15;
+    --shadow:0 1px 2px rgba(0,0,0,.5), 0 10px 30px -22px #000;
+  }
+}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--bg); color:var(--ink);
+  font-family:"Hiragino Kaku Gothic ProN","Hiragino Sans","Yu Gothic Medium","Yu Gothic",Meiryo,system-ui,sans-serif;
+  font-size:15px; line-height:1.7;
+}
+.wrap{max-width:900px; margin:0 auto; padding:0 16px 72px}
+header{padding:26px 0 14px; display:flex; flex-direction:column; gap:6px}
+h1{margin:0; font-size:21px; font-weight:700; letter-spacing:-.01em}
+.stamp{font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums}
+.stamp b{color:var(--ink); font-weight:600}
+.tab{display:inline-block; font-size:12.5px; color:var(--accent); text-decoration:none; border-bottom:1px solid currentColor; padding-bottom:1px}
+.tab:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
+
+nav{display:flex; gap:6px; overflow-x:auto; padding:10px 0 14px; margin:0 -16px; padding-left:16px; padding-right:16px; scrollbar-width:none}
+nav::-webkit-scrollbar{display:none}
+nav button{flex:none; border:1px solid var(--line); background:var(--card); color:var(--sub);
+  border-radius:999px; padding:7px 14px; font-size:13px; font-family:inherit; cursor:pointer; white-space:nowrap}
+nav button[aria-pressed="true"]{background:var(--accent); border-color:var(--accent); color:#fff; font-weight:600}
+nav button:focus-visible{outline:2px solid var(--accent); outline-offset:2px}
+
+.toolbar{display:flex; align-items:center; gap:14px; flex-wrap:wrap; padding-bottom:14px; font-size:13px; color:var(--sub)}
+.toolbar label{display:inline-flex; align-items:center; gap:6px; cursor:pointer}
+
+h2{font-size:13px; letter-spacing:.1em; color:var(--sub); font-weight:600; margin:26px 0 10px}
+
+.kpis{display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px}
+.kpi{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:2px}
+.kpi .v{font-size:25px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.15}
+.kpi .l{font-size:11.5px; color:var(--sub); line-height:1.5}
+.kpi.good .v{color:var(--hit)} .kpi.bad .v{color:var(--miss)}
+
+.note{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; font-size:13px; color:var(--sub); line-height:1.75; box-shadow:var(--shadow)}
+.note b{color:var(--ink)}
+.note + .note{margin-top:8px}
+
+.scroll{overflow-x:auto; background:var(--card); border:1px solid var(--line); border-radius:8px; box-shadow:var(--shadow)}
+table{border-collapse:collapse; width:100%; font-size:13px; min-width:640px}
+th,td{padding:8px 11px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; white-space:nowrap}
+thead th{font-size:10.5px; letter-spacing:.08em; color:var(--sub); font-weight:600; background:var(--bg); position:sticky; top:0; z-index:1}
+tbody tr:last-child td{border-bottom:none}
+.n{text-align:right; font-variant-numeric:tabular-nums}
+td.ev{white-space:normal; font-size:12px; color:var(--sub); min-width:180px; line-height:1.55}
+.sat{color:#2f6f9e} .sun{color:#a3402b}
+.pill{display:inline-block; min-width:56px; text-align:center; font-size:11.5px; font-weight:700; padding:1px 8px; border-radius:999px; font-variant-numeric:tabular-nums}
+.pill.hit{background:var(--hitbg); color:var(--hit)}
+.pill.near{background:var(--nearbg); color:var(--near)}
+.pill.miss{background:var(--missbg); color:var(--miss)}
+.dim{color:var(--sub)}
+
+footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font-size:11.5px; color:var(--sub); line-height:1.8}
+#err{display:none; padding:14px; border:1px solid var(--miss); color:var(--miss); border-radius:8px; font-size:13px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <h1>答え合わせ</h1>
+  <div class="stamp" id="stamp">読み込み中…</div>
+  <div><a class="tab" href="./">← 売上予報にもどる</a></div>
+</header>
+
+<div id="err"></div>
+<nav id="shops"></nav>
+
+<h2>直近30日のあたり具合</h2>
+<div class="kpis" id="kpis"></div>
+
+<div id="livebox"></div>
+
+<h2>日ごとの答え合わせ</h2>
+<div class="toolbar">
+  <label><input type="checkbox" id="onlyEvent"> 催しがあった日だけ</label>
+  <label><input type="checkbox" id="onlyMiss"> 外した日だけ（20%超）</label>
+  <span id="count"></span>
+</div>
+<div class="scroll"><table>
+  <thead><tr>
+    <th>日付</th><th class="n">予測客数</th><th class="n">実績客数</th><th class="n">差</th>
+    <th class="n">売上 予測</th><th class="n">実績</th><th class="n">誤差</th><th>その日の催し</th>
+  </tr></thead>
+  <tbody id="rows"></tbody>
+</table></div>
+
+<footer>
+  <div><b>売上は水準（普段の平均日＝100）で比べています。</b>金額そのものはこのページには出しません。客数は人数のままです。</div>
+  <div>いまの数字は<b>バックテスト</b>です。いまのモデルを過去の日に当てはめ直して答え合わせしているため、自分が学習に使った日を言い当てているぶん<b>甘めに出ます</b>。毎朝ためている「前日までに実際に出した予測」との答え合わせは、件数が貯まりしだい上の枠に出ます。そちらが本当の精度です。</div>
+  <div id="built"></div>
+</footer>
+</div>
+
+<script>
+const WD = ['月','火','水','木','金','土','日'];
+let R = null, current = null;
+
+function cls(e){ const a = Math.abs(e); return a <= 10 ? 'hit' : (a <= 20 ? 'near' : 'miss'); }
+function signed(v, unit = ''){ return `${v > 0 ? '＋' : (v < 0 ? '−' : '±')}${Math.abs(v)}${unit}`; }
+const median = a => { const s = [...a].sort((x, y) => x - y); return s.length ? s[Math.floor(s.length / 2)] : null; };
+
+function rowsFor(code, limitDays){
+  const cut = limitDays
+    ? new Date(Date.parse(R.actualThrough) - (limitDays - 1) * 864e5).toISOString().slice(0, 10)
+    : '0000-00-00';
+  return R.days.filter(d => d.date >= cut && d.shops[code]).map(d => ({ d, s: d.shops[code] }));
+}
+
+function renderKpis(){
+  const list = rowsFor(current, 30).filter(x => !x.s.abn);
+  const errs = list.map(x => Math.abs(x.s.err));
+  const pe = list.filter(x => x.s.pplErr != null).map(x => Math.abs(x.s.pplErr));
+  const withEv = list.filter(x => x.s.why.length);
+  const hit = errs.filter(e => e <= 10).length;
+  const box = (v, l, k = '') => `<div class="kpi ${k}"><div class="v">${v}</div><div class="l">${l}</div></div>`;
+  document.getElementById('kpis').innerHTML = [
+    box(`${median(errs) ?? '—'}<span style="font-size:15px">%</span>`, '売上の誤差（中央値）', median(errs) <= 15 ? 'good' : ''),
+    box(`${Math.round(hit / list.length * 100)}<span style="font-size:15px">%</span>`, '誤差10%以内に収まった日'),
+    box(`${median(pe) ?? '—'}<span style="font-size:15px">人</span>`, '客数の外れ幅（中央値）'),
+    box(`${withEv.length}<span style="font-size:15px">日</span>`, '催しがあった日（30日中）'),
+  ].join('');
+}
+
+function renderLive(){
+  const live = (R.live || []).filter(x => x.code === current);
+  const el = document.getElementById('livebox');
+  if (!live.length){
+    el.innerHTML = `<h2>前日までに出した予測との答え合わせ</h2>
+      <div class="note">まだ件数がありません。毎朝の実行ぶんが1日ずつ貯まって、実績が出た日から順にここへ出ます。<b>これが本当の精度</b>で、下の表（バックテスト）より厳しい数字になります。</div>`;
+    return;
+  }
+  const errs = live.map(x => x.err);
+  el.innerHTML = `<h2>前日までに出した予測との答え合わせ</h2>
+    <div class="scroll"><table>
+      <thead><tr><th>日付</th><th class="n">何日前の予測</th><th class="n">売上の誤差</th><th class="n">予測客数</th><th class="n">実績客数</th><th class="n">差</th></tr></thead>
+      <tbody>${live.map(x => `<tr>
+        <td>${x.date.slice(5).replace('-', '/')}</td>
+        <td class="n">${x.h}日前</td>
+        <td class="n"><span class="pill ${cls(x.err)}">${x.err}%</span></td>
+        <td class="n">${x.pplPred ?? '—'}</td>
+        <td class="n">${x.pplAct ?? '—'}</td>
+        <td class="n">${x.pplErr == null ? '—' : signed(x.pplErr, '人')}</td>
+      </tr>`).join('')}</tbody>
+    </table></div>
+    <div class="note" style="margin-top:8px">平均誤差 <b>${(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(1)}%</b>（${errs.length}件）</div>`;
+}
+
+function renderRows(){
+  const onlyEvent = document.getElementById('onlyEvent').checked;
+  const onlyMiss = document.getElementById('onlyMiss').checked;
+  let list = rowsFor(current, 120).reverse();
+  if (onlyEvent) list = list.filter(x => x.s.why.length);
+  if (onlyMiss) list = list.filter(x => Math.abs(x.s.err) > 20);
+  document.getElementById('count').textContent = `${list.length}日ぶん`;
+  document.getElementById('rows').innerHTML = list.map(({ d, s }) => {
+    const wd = d.w === 5 ? 'sat' : (d.w === 6 || d.hol ? 'sun' : '');
+    return `<tr${s.abn ? ' style="opacity:.55"' : ''}>
+      <td>${d.date.slice(5).replace('-', '/')} <span class="${wd}">${WD[d.w]}${d.hol ? '祝' : ''}</span>${s.abn ? ' <span class="pill near" style="min-width:0">休業?</span>' : ''}</td>
+      <td class="n">${s.pplPred ?? '—'}</td>
+      <td class="n"><b>${s.pplAct ?? '—'}</b></td>
+      <td class="n ${s.pplErr == null ? 'dim' : ''}">${s.pplErr == null ? '—' : signed(s.pplErr, '人')}</td>
+      <td class="n dim">${s.lvlPred}</td>
+      <td class="n"><b>${s.lvlAct}</b></td>
+      <td class="n"><span class="pill ${cls(s.err)}">${s.err > 0 ? '+' : ''}${s.err}%</span></td>
+      <td class="ev">${s.abn ? '<span style="color:var(--near)">通常営業でない可能性が高い日（同じ曜日の4分の1も売れていない）。学習と集計から外しています。</span>' : (s.why.length ? s.why.join('／') : '<span class="dim">—</span>')}</td>
+    </tr>`;
+  }).join('') || '<tr><td colspan="8" class="dim" style="padding:16px">条件に合う日がありません。</td></tr>';
+}
+
+function pick(code){
+  current = code;
+  [...document.querySelectorAll('#shops button')].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.code === code)));
+  localStorage.setItem('doteppan-forecast-shop', code);
+  renderKpis(); renderLive(); renderRows();
+}
+
+(async function(){
+  try {
+    R = await fetch('data/review.json?v=' + Date.now()).then(r => r.json());
+  } catch (e) {
+    const el = document.getElementById('err');
+    el.style.display = 'block';
+    el.textContent = 'データを読み込めませんでした。しばらく待って開き直してください。';
+    return;
+  }
+  document.getElementById('stamp').innerHTML = `実績は <b>${R.actualThrough}</b> まで ／ 過去 <b>${R.days.length}日</b>ぶんを照合`;
+  document.getElementById('built').textContent = `最終更新 ${new Date(R.generatedAt).toLocaleString('ja-JP')}`;
+  document.getElementById('shops').innerHTML = R.shops
+    .map(s => `<button data-code="${s.code}" aria-pressed="false">${s.name}</button>`).join('');
+  document.querySelectorAll('#shops button').forEach(b => b.onclick = () => pick(b.dataset.code));
+  document.getElementById('onlyEvent').onchange = renderRows;
+  document.getElementById('onlyMiss').onchange = renderRows;
+  const saved = localStorage.getItem('doteppan-forecast-shop');
+  pick(R.shops.some(s => s.code === saved) ? saved : (R.shops.find(s => s.code === '001000') ? '001000' : R.shops[0].code));
+})();
+</script>
+</body>
+</html>

@@ -102,6 +102,16 @@ by_shop = collections.defaultdict(dict)
 for r in rows:
     by_shop[r["code"]][r["date"]] = r
 
+# 同じ曜日の中央値の25%も売れていない日は、臨時休業・短縮営業・POSの事故とみて学習から外す。
+# （2289日中16日。残しておくと水準が沈み、予測が全体に低く出る）
+ABNORMAL = set()
+for _code, _days in by_shop.items():
+    _med = {w: st.median([x["sales"] for d, x in _days.items()
+                          if dt.date.fromisoformat(d).weekday() == w] or [0]) for w in range(7)}
+    for d, x in _days.items():
+        if x["sales"] < _med[dt.date.fromisoformat(d).weekday()] * 0.25:
+            ABNORMAL.add((_code, d))
+
 
 def daterange(a, b):
     d = a
@@ -111,16 +121,17 @@ def daterange(a, b):
 
 
 # ---------------------------------------------------------------- 月（季節）係数：全店共通
-def month_factors():
+def month_factors(metric):
     per = collections.defaultdict(list)
     for code, days in by_shop.items():
-        vals = [x["sales"] for x in days.values()]
+        vals = [x[metric] for x in days.values() if x[metric]]
         if len(vals) < 60:
             continue
         base = st.median(vals)
         m_med = collections.defaultdict(list)
         for date, x in days.items():
-            m_med[int(date[5:7])].append(x["sales"])
+            if x[metric]:
+                m_med[int(date[5:7])].append(x[metric])
         for m, v in m_med.items():
             if len(v) >= 12:
                 per[m].append(st.median(v) / base)
@@ -130,111 +141,122 @@ def month_factors():
     return out
 
 
-MONTH = month_factors()
-
 # ---------------------------------------------------------------- 店ごとに係数を学習
-models = {}
-for code in SHOPS:
-    days = by_shop.get(code, {})
-    if len(days) < 40:
-        continue
-    recent_from = (LAST - dt.timedelta(weeks=RECENT_WEEKS)).isoformat()
+def fit(metric):
+    """売上でも客数でも同じ形のモデルを当てる。客数を別に学習するのは、宴会のように
+    「人数はそこそこでも単価が跳ねる」催しと、祭りのように「人数がそのまま増える」催しで
+    効き方が違うため。人員配置に要るのは人数のほう。"""
+    MONTH = month_factors(metric)
+    models = {}
+    for code in SHOPS:
+        days = {d: x for d, x in (by_shop.get(code) or {}).items()
+                if x[metric] and (code, d) not in ABNORMAL}
+        if len(days) < 40:
+            continue
+        recent_from = (LAST - dt.timedelta(weeks=RECENT_WEEKS)).isoformat()
 
-    dates = sorted(days)
-    tags_of = {d: [t for t, *_ in day_tags(code, d)] for d in dates}
-    priors = shop_priors(code)
+        dates = sorted(days)
+        tags_of = {d: [t for t, *_ in day_tags(code, d)] for d in dates}
+        priors = shop_priors(code)
 
-    def shrink(obs, prior, k=SHRINK):
-        return (len(obs) * st.median(obs) + k * prior) / (len(obs) + k) if obs else prior
+        def shrink(obs, prior, k=SHRINK):
+            return (len(obs) * st.median(obs) + k * prior) / (len(obs) + k) if obs else prior
 
-    # 曜日・水準・イベント係数はお互いに絡んでいる（月島は9割の日に何かの展示会が当たっている
-    # ので「イベントの無い日」だけを基準にすると水準が沈む）。順番に決めず、3周まわして
-    # 互いに引き算しながら収束させる。
-    coef, nobs = {}, {}
-    dow = {w: 1.0 for w in range(7)}
-    lvl_cache, level, base_of = {}, None, None
-
-    for _ in range(3):
-        def stripped(date):
-            """暦・イベントの効果を取り除いた売上"""
-            v = days[date]["sales"] / MONTH[dt.date.fromisoformat(date).month]
-            for t in tags_of[date]:
-                v /= coef.get(t, 1.0)
-            return v
-
-        # 曜日の形
-        by_w = collections.defaultdict(list)
-        for date in dates:
-            by_w[dt.date.fromisoformat(date).weekday()].append(stripped(date))
-        center = st.median([v for g in by_w.values() for v in g])
-        dow = {w: (st.median(by_w[w]) / center if by_w.get(w) else 1.0) for w in range(7)}
-
-        # その時期の水準（開店直後は高く、あとで落ち着く。前後6週の中央値で追う）
-        adj = {d: stripped(d) / dow[dt.date.fromisoformat(d).weekday()] for d in dates}
-        fallback = st.median(adj.values())
-        lvl_cache = {}
-
-        def level_at(date, _adj=adj, _fb=fallback):
-            if date in lvl_cache:
-                return lvl_cache[date]
-            d0 = dt.date.fromisoformat(date)
-            for span in (42, 84, 180):
-                lo, hi = (d0 - dt.timedelta(span)).isoformat(), (d0 + dt.timedelta(span)).isoformat()
-                w = [_adj[k] for k in dates if lo <= k <= hi]
-                if len(w) >= 12:
-                    lvl_cache[date] = st.median(w)
-                    return lvl_cache[date]
-            lvl_cache[date] = _fb
-            return _fb
-
-        recent = [adj[k] for k in dates if k >= recent_from]
-        level = st.median(recent) if len(recent) >= 8 else fallback
-
-        def base_of(date, _lv=level_at):
-            d0 = dt.date.fromisoformat(date)
-            return _lv(date) * dow[d0.weekday()] * MONTH[d0.month]
-
-        # 暦とイベントの係数を残差から学習し直す
-        tag_r = collections.defaultdict(list)
-        for date in dates:
-            if not tags_of[date]:
-                continue
-            r = days[date]["sales"] / base_of(date)
-            share = 1.0 / len(tags_of[date])   # 複数の要因が重なる日は等分に割り当てる
-            for t in tags_of[date]:
-                tag_r[t].append(r ** share)
-
-        # 展示会は「展示会ぜんぶ → 格 → 格×曜日区分」と段階的に絞る。
-        # いきなり細かく割ると実績3件の枠が暴れるので、上の階層へ引き戻す。
-        c_all = shrink([v for t, g in tag_r.items() if t.startswith("bigsight-") for v in g], 1.0, 12)
-        c_fam = {fam: shrink([v for t, g in tag_r.items() if t.startswith(fam + "@") for v in g], c_all, 12)
-                 for fam in BS_RANK}
-
+        # 曜日・水準・イベント係数はお互いに絡んでいる（月島は9割の日に何かの展示会が当たっている
+        # ので「イベントの無い日」だけを基準にすると水準が沈む）。順番に決めず、3周まわして
+        # 互いに引き算しながら収束させる。
         coef, nobs = {}, {}
-        for tag in set(list(tag_r.keys()) + list(priors.keys())):
-            obs = tag_r.get(tag, [])
-            fam = tag.split("@")[0]
-            prior = c_fam[fam] if fam in BS_RANK else priors.get(tag, 1.0)
-            coef[tag] = min(2.5, max(0.4, shrink(obs, prior, 12 if fam in BS_RANK else SHRINK)))
-            nobs[tag] = len(obs)
+        dow = {w: 1.0 for w in range(7)}
+        lvl_cache, level, base_of = {}, None, None
 
-    models[code] = {
-        "level": level, "dow": dow, "coef": coef, "nobs": nobs, "base_of": base_of,
-        "median": st.median([x["sales"] for x in days.values()]),
-        "days": len(days),
-    }
+        for _ in range(3):
+            def stripped(date):
+                """暦・イベントの効果を取り除いた数字"""
+                v = days[date][metric] / MONTH[dt.date.fromisoformat(date).month]
+                for t in tags_of[date]:
+                    v /= coef.get(t, 1.0)
+                return v
+
+            # 曜日の形
+            by_w = collections.defaultdict(list)
+            for date in dates:
+                by_w[dt.date.fromisoformat(date).weekday()].append(stripped(date))
+            center = st.median([v for g in by_w.values() for v in g])
+            dow = {w: (st.median(by_w[w]) / center if by_w.get(w) else 1.0) for w in range(7)}
+
+            # その時期の水準（開店直後は高く、あとで落ち着く。前後6週の中央値で追う）
+            adj = {d: stripped(d) / dow[dt.date.fromisoformat(d).weekday()] for d in dates}
+            fallback = st.median(adj.values())
+            lvl_cache = {}
+
+            def level_at(date, _adj=adj, _fb=fallback):
+                if date in lvl_cache:
+                    return lvl_cache[date]
+                d0 = dt.date.fromisoformat(date)
+                for span in (42, 84, 180):
+                    lo, hi = (d0 - dt.timedelta(span)).isoformat(), (d0 + dt.timedelta(span)).isoformat()
+                    w = [_adj[k] for k in dates if lo <= k <= hi]
+                    if len(w) >= 12:
+                        lvl_cache[date] = st.median(w)
+                        return lvl_cache[date]
+                lvl_cache[date] = _fb
+                return _fb
+
+            recent = [adj[k] for k in dates if k >= recent_from]
+            level = st.median(recent) if len(recent) >= 8 else fallback
+
+            def base_of(date, _lv=level_at):
+                d0 = dt.date.fromisoformat(date)
+                return _lv(date) * dow[d0.weekday()] * MONTH[d0.month]
+
+            # 暦とイベントの係数を残差から学習し直す
+            tag_r = collections.defaultdict(list)
+            for date in dates:
+                if not tags_of[date]:
+                    continue
+                r = days[date][metric] / base_of(date)
+                share = 1.0 / len(tags_of[date])   # 複数の要因が重なる日は等分に割り当てる
+                for t in tags_of[date]:
+                    tag_r[t].append(r ** share)
+
+            # 展示会は「展示会ぜんぶ → 格 → 格×曜日区分」と段階的に絞る。
+            # いきなり細かく割ると実績3件の枠が暴れるので、上の階層へ引き戻す。
+            c_all = shrink([v for t, g in tag_r.items() if t.startswith("bigsight-") for v in g], 1.0, 12)
+            c_fam = {fam: shrink([v for t, g in tag_r.items() if t.startswith(fam + "@") for v in g], c_all, 12)
+                     for fam in BS_RANK}
+
+            coef, nobs = {}, {}
+            for tag in set(list(tag_r.keys()) + list(priors.keys())):
+                obs = tag_r.get(tag, [])
+                fam = tag.split("@")[0]
+                prior = c_fam[fam] if fam in BS_RANK else priors.get(tag, 1.0)
+                coef[tag] = min(2.5, max(0.4, shrink(obs, prior, 12 if fam in BS_RANK else SHRINK)))
+                nobs[tag] = len(obs)
+
+        models[code] = {
+            "level": level, "dow": dow, "coef": coef, "nobs": nobs, "base_of": base_of,
+            "month": MONTH,
+            "median": st.median([x[metric] for x in days.values()]),
+            "days": len(days),
+        }
+    return models
 
 
-def predict(code, date):
-    """(予測売上, 平常比, 効いた要因) を返す。
+models = fit("sales")
+pmodels = fit("people")
+MONTH = models[next(iter(models))]["month"] if models else {m: 1.0 for m in range(1, 13)}
+
+
+def predict_with(mods, code, date):
+    """(予測値, 催しによる倍率, 催しがなかった場合の平常値, 効いた要因) を返す。
 
     祝日・年末年始・お盆・休前日は「その日の平常」の側に入れる。カレンダーを見れば分かる
     ことを要因として並べても仕方がないため。平常比が動くのは、祭り・展示会・コンベンション
     といった外の催しがあるときだけになる。
     """
-    m = models[code]
+    m = mods[code]
     d = dt.date.fromisoformat(date)
-    base = m["level"] * m["dow"][d.weekday()] * MONTH[d.month]
+    base = m["level"] * m["dow"][d.weekday()] * m["month"][d.month]
     for tag, *_ in calendar_tags(date):
         base *= m["coef"].get(tag, 1.0)
     idx, why = 1.0, []
@@ -242,7 +264,20 @@ def predict(code, date):
         c = m["coef"].get(tag, prior or 1.0)
         idx *= c
         why.append({"tag": tag, "name": name, "coef": round(c, 2), "n": m["nobs"].get(tag, 0), "note": note})
-    return base * idx, idx, why
+    return base * idx, idx, base, why
+
+
+def predict(code, date):
+    v, idx, _base, why = predict_with(models, code, date)
+    return v, idx, why
+
+
+def predict_people(code, date):
+    """(予測客数, 催しがない日の客数) を人で返す"""
+    if code not in pmodels:
+        return None, None
+    v, _idx, base, _why = predict_with(pmodels, code, date)
+    return round(v), round(base)
 
 
 def rank_of(idx):
@@ -261,10 +296,13 @@ for d in daterange(start, start + dt.timedelta(HORIZON - 1)):
     entry = {"date": date, "w": d.weekday(), "hol": date in HOLIDAYS, "shops": {}}
     for code in models:
         pred, idx, why = predict(code, date)
+        ppl, pplBase = predict_people(code, date)
         entry["shops"][code] = {
             "lvl": round(pred / models[code]["median"] * 100),
             "idx": round(idx, 3),
             "rank": rank_of(idx),
+            "ppl": ppl,            # 予測客数（人）
+            "pplBase": pplBase,    # 催しがなかった場合の客数（人）
             "why": why,
         }
     days_out.append(entry)
@@ -286,12 +324,40 @@ for d in daterange(LAST - dt.timedelta(89), LAST):
     if e["shops"]:
         hist.append(e)
 
+# ---------------------------------------------------------------- 答え合わせ用（過去120日）
+# 「実際に前日までに出した予測」がまだ貯まっていないので、当面はモデルを過去に当てはめ直した
+# 検証（バックテスト）も併記する。後者は自分の学習データを言い当てているぶん甘く出るので、
+# ページ側でも区別して表示する。
+review = []
+for d in daterange(LAST - dt.timedelta(119), LAST):
+    date = d.isoformat()
+    e = {"date": date, "w": d.weekday(), "hol": date in HOLIDAYS, "shops": {}}
+    for code in models:
+        x = by_shop[code].get(date)
+        if not x:
+            continue
+        pred, idx, why = predict(code, date)
+        ppl, pplBase = predict_people(code, date)
+        med = models[code]["median"]
+        e["shops"][code] = {
+            "lvlPred": round(pred / med * 100), "lvlAct": round(x["sales"] / med * 100),
+            "err": round((pred - x["sales"]) / x["sales"] * 100),
+            "abn": (code, date) in ABNORMAL,
+            "pplPred": ppl, "pplBase": pplBase, "pplAct": x["people"] or None,
+            "pplErr": (round(ppl - x["people"]) if ppl and x["people"] else None),
+            "idx": round(idx, 3),
+            "why": [w["name"] for w in why],
+        }
+    if e["shops"]:
+        review.append(e)
+
 # ---------------------------------------------------------------- 予測ログと精度
 LOG = CACHE / "prediction_log.json"
 log = json.loads(LOG.read_text(encoding="utf-8")) if LOG.exists() else {}
 run_date = LAST.isoformat()
 log[run_date] = {
-    code: {d["date"]: round(predict(code, d["date"])[0]) for d in days_out[:21]}
+    code: {d["date"]: [round(predict(code, d["date"])[0]), predict_people(code, d["date"])[0]]
+           for d in days_out[:21]}
     for code in models
 }
 # 実績が出そろった古いログは残しつつ、200日より前は捨てる
@@ -308,18 +374,26 @@ for made_on, shops_pred in log.items():
         if code not in models:
             continue
         for date, pred in dates.items():
+            # 旧フォーマット（売上だけの数値）も読めるようにしておく
+            pred_sales, pred_ppl = pred if isinstance(pred, list) else (pred, None)
             actual = by_shop[code].get(date)
             if not actual or date > LAST.isoformat():
                 continue
             h = (dt.date.fromisoformat(date) - dt.date.fromisoformat(made_on)).days
             if h < 1:
                 continue
-            err = abs(pred - actual["sales"]) / actual["sales"]
+            if (code, date) in ABNORMAL:
+                continue   # 臨時休業などの日は精度の評価から外す
+            err = abs(pred_sales - actual["sales"]) / actual["sales"]
             bucket = "1-3日前" if h <= 3 else ("4-7日前" if h <= 7 else "8日以上前")
             errs[bucket].append(err)
             if h <= 7:
                 per_shop[code].append(err)
-                recent_pairs.append({"date": date, "code": code, "h": h, "err": round(err * 100, 1)})
+                recent_pairs.append({
+                    "date": date, "code": code, "h": h, "err": round(err * 100, 1),
+                    "pplPred": pred_ppl, "pplAct": actual["people"] or None,
+                    "pplErr": (pred_ppl - actual["people"]) if pred_ppl and actual["people"] else None,
+                })
 
 accuracy = {
     "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
@@ -362,6 +436,14 @@ upcoming.sort(key=lambda x: x["from"])
     "days": days_out,
     "history": hist,
     "events": upcoming,
+}, ensure_ascii=False), encoding="utf-8")
+
+(OUT / "review.json").write_text(json.dumps({
+    "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+    "actualThrough": LAST.isoformat(),
+    "shops": meta_shops,
+    "days": review,
+    "live": accuracy["recent"],
 }, ensure_ascii=False), encoding="utf-8")
 
 (OUT / "accuracy.json").write_text(json.dumps(accuracy, ensure_ascii=False), encoding="utf-8")

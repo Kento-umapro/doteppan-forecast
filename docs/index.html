@@ -38,6 +38,8 @@ header{padding:26px 0 14px; display:flex; flex-direction:column; gap:6px}
 h1{margin:0; font-size:21px; font-weight:700; letter-spacing:-.01em}
 .stamp{font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums}
 .stamp b{color:var(--ink); font-weight:600}
+.tab{display:inline-block; font-size:12.5px; color:var(--accent); text-decoration:none; border-bottom:1px solid currentColor; padding-bottom:1px}
+.tab:focus-visible{outline:2px solid var(--accent); outline-offset:3px}
 
 nav{display:flex; gap:6px; overflow-x:auto; padding:10px 0 14px; margin:0 -16px; padding-left:16px; padding-right:16px; scrollbar-width:none}
 nav::-webkit-scrollbar{display:none}
@@ -74,9 +76,13 @@ h2{font-size:13px; letter-spacing:.1em; color:var(--sub); font-weight:600; margi
 .d-why .none{color:var(--sub)}
 .d-why .weak{color:var(--sub); font-size:11.5px}
 .d-bar{grid-column:2 / -1; grid-row:2; display:flex; align-items:center; gap:8px; margin-top:2px}
-.track{flex:1; height:6px; border-radius:3px; background:var(--line); position:relative; overflow:hidden; max-width:320px}
+.track{flex:1; min-width:40px; height:6px; border-radius:3px; background:var(--line); position:relative; overflow:hidden; max-width:320px}
 .fill{height:100%; background:var(--accent); border-radius:3px}
 .up2 .fill{background:var(--up2)} .dn2 .fill{background:var(--dn2)}
+.ppl{font-size:12.5px; white-space:nowrap; font-variant-numeric:tabular-nums}
+.ppl b{font-size:15px; font-weight:700}
+.up2 .ppl b, .up1 .ppl b{color:var(--up2)} .dn1 .ppl b, .dn2 .ppl b{color:var(--dn2)}
+.ppl .delta{color:var(--sub); font-size:11.5px}
 .lvl{font-size:11.5px; color:var(--sub); font-variant-numeric:tabular-nums; white-space:nowrap}
 
 .note{background:var(--card); border:1px solid var(--line); border-radius:8px; padding:14px 16px; font-size:13px; color:var(--sub); line-height:1.75; box-shadow:var(--shadow)}
@@ -101,6 +107,7 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 <header>
   <h1>どてっぱん 売上予報</h1>
   <div class="stamp" id="stamp">読み込み中…</div>
+  <div><a class="tab" href="review.html">答え合わせ（予測と実績）→</a></div>
 </header>
 
 <div id="err"></div>
@@ -125,7 +132,7 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 <footer>
   <div>ダイニーの日別実績を毎朝読み込んで、翌日以降60日ぶんを予測しています。係数は毎日学習し直しているので、実績が貯まるほど当たるようになります。</div>
   <div><b>平常比</b>が動くのは、祭り・展示会・コンベンションなど<b>外の催し</b>があるときだけです。曜日・季節・祝日・連休・お盆は「その日の平常」の側に織り込んであります（カレンダーを見れば分かることなので要因には出しません）。祝日そのものの上振れは<b>水準</b>の数字に出ます。</div>
-  <div>売上の金額はこのページには出しません（平常を1.00とした指数と、普段の平均日を100とした水準だけ）。実額はダイニーで確認してください。</div>
+  <div><b>客数</b>は人数そのままの予測です。人員配置はこの数字で組んでください。売上の金額はこのページには出しません（平常を1.00とした指数と、普段の平均日を100とした水準だけ）。実額はダイニーで確認してください。</div>
   <div id="built"></div>
 </footer>
 </div>
@@ -156,11 +163,14 @@ function dayCard(d, code){
       }).join('<br>')
     : '<span class="none">近隣に催しなし</span>';
   const w = Math.max(3, Math.min(100, s.lvl / 3));
+  const dl = (s.ppl != null && s.pplBase != null) ? s.ppl - s.pplBase : null;
+  const ppl = s.ppl == null ? ''
+    : `<span class="ppl"><b>${s.ppl}人</b>${dl ? ` <span class="delta">平常${s.pplBase}人 ${dl > 0 ? '＋' : '−'}${Math.abs(dl)}人</span>` : ''}</span>`;
   return `<div class="day ${cls}${d.date === todayJST() ? ' today' : ''}">
     <div class="d-date">${d.date.slice(5).replace('-', '/')}<small class="${wd}">${WD[d.w]}${d.hol ? '・祝' : ''}</small></div>
     <div class="d-why">${why}</div>
     <div class="d-badge">${s.rank === 'flat' ? '平常' : `${LABEL[s.rank]} ${pct(s.idx)}`}</div>
-    <div class="d-bar"><div class="track"><div class="fill" style="width:${w}%"></div></div><span class="lvl">水準 ${s.lvl}（普段の平均＝100）</span></div>
+    <div class="d-bar">${ppl}<div class="track"><div class="fill" style="width:${w}%"></div></div><span class="lvl">水準 ${s.lvl}</span></div>
   </div>`;
 }
 
