@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
-<title>どてっぱん 売上予報｜答え合わせ</title>
+<title>どてっぱん 売上予報（トライアル）｜答え合わせ</title>
 <style>
 :root{
   --bg:#f6f7f5; --card:#ffffff; --ink:#14181a; --sub:#69736f; --line:#dde2df;
@@ -34,6 +34,9 @@ body{
 .wrap{max-width:900px; margin:0 auto; padding:0 16px 72px}
 header{padding:26px 0 14px; display:flex; flex-direction:column; gap:6px}
 h1{margin:0; font-size:21px; font-weight:700; letter-spacing:-.01em}
+.trial{display:inline-block; margin-left:8px; vertical-align:middle; font-size:10.5px; font-weight:700;
+  letter-spacing:.08em; padding:2px 8px; border-radius:999px;
+  border:1px solid var(--accent); color:var(--accent); background:transparent}
 .stamp{font-size:12px; color:var(--sub); font-variant-numeric:tabular-nums}
 .stamp b{color:var(--ink); font-weight:600}
 .tab{display:inline-block; font-size:12.5px; color:var(--accent); text-decoration:none; border-bottom:1px solid currentColor; padding-bottom:1px}
@@ -82,7 +85,7 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 <body>
 <div class="wrap">
 <header>
-  <h1>答え合わせ</h1>
+  <h1>答え合わせ<span class="trial">トライアル</span></h1>
   <div class="stamp" id="stamp">読み込み中…</div>
   <div><a class="tab" href="./">← 売上予報にもどる</a></div>
 </header>
@@ -94,6 +97,7 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 <div class="kpis" id="kpis"></div>
 
 <div id="livebox"></div>
+<div id="headbox"></div>
 
 <h2>日ごとの答え合わせ</h2>
 <div class="toolbar">
@@ -104,13 +108,17 @@ footer{margin-top:34px; padding-top:16px; border-top:1px solid var(--line); font
 <div class="scroll"><table>
   <thead><tr>
     <th>日付</th><th class="n">予測客数</th><th class="n">実績客数</th><th class="n">差</th>
-    <th class="n">売上 予測</th><th class="n">実績</th><th class="n">誤差</th><th>その日の催し</th>
+    <th class="n">売上 実績</th>
+    <th class="n">この予報</th><th class="n">誤差</th>
+    <th class="n">ダイニー</th><th class="n">誤差</th>
+    <th>その日の催し</th>
   </tr></thead>
   <tbody id="rows"></tbody>
 </table></div>
 
 <footer>
   <div><b>売上は水準（普段の平均日＝100）で比べています。</b>金額そのものはこのページには出しません。客数は人数のままです。</div>
+  <div>「ダイニー」列は、ダイニーの<b>経営管理＞売上予測</b>が出しているその日の予測です。過去日ぶんも残っているので同じ土俵で並べています。ただし、その予測が<b>前日時点のものか、あとから計算し直したものかは判別できません</b>。この予報のバックテストと同じく甘めに出ている可能性があります。</div>
   <div>いまの数字は<b>バックテスト</b>です。いまのモデルを過去の日に当てはめ直して答え合わせしているため、自分が学習に使った日を言い当てているぶん<b>甘めに出ます</b>。毎朝ためている「前日までに実際に出した予測」との答え合わせは、件数が貯まりしだい上の枠に出ます。そちらが本当の精度です。</div>
   <div id="built"></div>
 </footer>
@@ -170,6 +178,25 @@ function renderLive(){
     <div class="note" style="margin-top:8px">平均誤差 <b>${(errs.reduce((a, b) => a + b, 0) / errs.length).toFixed(1)}%</b>（${errs.length}件）</div>`;
 }
 
+function renderHead(){
+  const h = (R.head || {})[current];
+  const el = document.getElementById('headbox');
+  if (!h){ el.innerHTML = ''; return; }
+  const diff = (h.dinii - h.ours).toFixed(1);
+  const verdict = Math.abs(h.dinii - h.ours) < 2 ? 'ほぼ互角です。'
+    : (h.ours < h.dinii ? `この予報のほうが <b>${Math.abs(diff)}ポイント</b>近い。` : `ダイニーのほうが <b>${Math.abs(diff)}ポイント</b>近い。`);
+  el.innerHTML = `<h2>ダイニーの売上予測との比較</h2>
+    <div class="kpis">
+      <div class="kpi ${h.ours <= h.dinii ? 'good' : ''}"><div class="v">${h.ours}<span style="font-size:15px">%</span></div><div class="l">この予報の誤差（中央値）</div></div>
+      <div class="kpi ${h.dinii < h.ours ? 'good' : ''}"><div class="v">${h.dinii}<span style="font-size:15px">%</span></div><div class="l">ダイニーの予測の誤差（中央値）</div></div>
+      <div class="kpi"><div class="v">${h.oursWin}<span style="font-size:15px">%</span></div><div class="l">この予報のほうが実績に近かった日</div></div>
+      <div class="kpi"><div class="v">${h.n}<span style="font-size:15px">日</span></div><div class="l">両方そろっている日数</div></div>
+    </div>
+    <div class="note" style="margin-top:8px">${verdict}
+    ダイニーの日別予測は<b>2026年2月23日ぶんから</b>残っています。うちの取り柄は精度そのものより、
+    <b>上振れ・下振れの理由が催しの名前で出ること</b>と<b>客数を人数で出すこと</b>です。</div>`;
+}
+
 function renderRows(){
   const onlyEvent = document.getElementById('onlyEvent').checked;
   const onlyMiss = document.getElementById('onlyMiss').checked;
@@ -184,19 +211,21 @@ function renderRows(){
       <td class="n">${s.pplPred ?? '—'}</td>
       <td class="n"><b>${s.pplAct ?? '—'}</b></td>
       <td class="n ${s.pplErr == null ? 'dim' : ''}">${s.pplErr == null ? '—' : signed(s.pplErr, '人')}</td>
-      <td class="n dim">${s.lvlPred}</td>
       <td class="n"><b>${s.lvlAct}</b></td>
+      <td class="n dim">${s.lvlPred}</td>
       <td class="n"><span class="pill ${cls(s.err)}">${s.err > 0 ? '+' : ''}${s.err}%</span></td>
+      <td class="n dim">${s.dnLvl ?? '—'}</td>
+      <td class="n">${s.dnErr == null ? '<span class="dim">—</span>' : `<span class="pill ${cls(s.dnErr)}">${s.dnErr > 0 ? '+' : ''}${s.dnErr}%</span>`}</td>
       <td class="ev">${s.abn ? '<span style="color:var(--near)">通常営業でない可能性が高い日（同じ曜日の4分の1も売れていない）。学習と集計から外しています。</span>' : (s.why.length ? s.why.join('／') : '<span class="dim">—</span>')}</td>
     </tr>`;
-  }).join('') || '<tr><td colspan="8" class="dim" style="padding:16px">条件に合う日がありません。</td></tr>';
+  }).join('') || '<tr><td colspan="10" class="dim" style="padding:16px">条件に合う日がありません。</td></tr>';
 }
 
 function pick(code){
   current = code;
   [...document.querySelectorAll('#shops button')].forEach(b => b.setAttribute('aria-pressed', String(b.dataset.code === code)));
   localStorage.setItem('doteppan-forecast-shop', code);
-  renderKpis(); renderLive(); renderRows();
+  renderKpis(); renderLive(); renderHead(); renderRows();
 }
 
 (async function(){

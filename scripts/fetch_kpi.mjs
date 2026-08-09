@@ -18,6 +18,13 @@ const START = process.argv[2] ?? '2025-10-01';
 const today = new Date(Date.now() + 9 * 3600 * 1000).toISOString().slice(0, 10); // JST
 const END = today;
 
+// ダイニー自身の日別売上予測（経営管理 > 売上予測 > 詳細）。過去日ぶんも残っている。
+const DINII_FORECAST_QUERY = `query GetShopDailyDetailedMetrics($shopId: String!, $from: DateTime!, $to: DateTime!, $shouldUseDemoData: Boolean) {
+  shopDailyDetailedMetrics(input: {shopId: $shopId, from: $from, to: $to, shouldUseDemoData: $shouldUseDemoData}) {
+    dailyMetrics { businessDate totalTaxIncludedAmount forecastedTotalTaxIncludedAmount salesBudgetAmount }
+  }
+}`;
+
 const KPI_QUERY = `query FlDashboardGetShopDailyBusinessKpi($corporationId: String!, $shopId: String!, $startAt: DateTime!, $endAt: DateTime!, $shouldUseDemoData: Boolean) {
   dailyShopBusinessKpi(input: {corporationId: $corporationId, shopId: $shopId, startAt: $startAt, endAt: $endAt, shouldUseDemoData: $shouldUseDemoData}) {
     dailyShopBusinessKpi { shopId businessDate totalTaxIncludedAmount numPeople weatherCondition salesTargetAmount }
@@ -79,9 +86,33 @@ for (const d = new Date(START + 'T00:00:00'); d <= new Date(END + 'T00:00:00'); 
   months.push([f(s) < START ? START : f(s), f(e) > END ? END : f(e)]);
 }
 
+/** 月初〜月末を、ダイニーAPIが期待する JST 基準の UTC 範囲に直す */
+function jstRange(a, b) {
+  return [
+    new Date(new Date(a + 'T00:00:00+09:00')).toISOString(),
+    new Date(new Date(b + 'T23:59:59+09:00')).toISOString(),
+  ];
+}
+
 const rows = [];
+const dinii = new Map();   // `${code}|${date}` -> ダイニーの予測
 for (const s of shops) {
   for (const [a, b] of months) {
+    try {
+      const [from, to] = jstRange(a, b);
+      const f = await gql({
+        operationName: 'GetShopDailyDetailedMetrics',
+        variables: { shopId: s.shopId, from, to, shouldUseDemoData: false },
+        query: DINII_FORECAST_QUERY,
+      });
+      for (const r of f.shopDailyDetailedMetrics?.dailyMetrics ?? []) {
+        if (r.forecastedTotalTaxIncludedAmount != null) {
+          dinii.set(`${s.code}|${r.businessDate}`, Math.round(r.forecastedTotalTaxIncludedAmount));
+        }
+      }
+    } catch (err) {
+      console.log(`\n  !! ${s.name} ${a} ダイニー予測: ${String(err.message).slice(0, 100)}`);
+    }
     try {
       const d = await gql({
         operationName: 'FlDashboardGetShopDailyBusinessKpi',
@@ -90,7 +121,9 @@ for (const s of shops) {
       });
       for (const r of d.dailyShopBusinessKpi?.dailyShopBusinessKpi ?? []) {
         if (!r.totalTaxIncludedAmount) continue;
-        rows.push({ code: s.code, date: r.businessDate, sales: r.totalTaxIncludedAmount, people: r.numPeople ?? 0, weather: r.weatherCondition ?? null, target: r.salesTargetAmount ?? null });
+        rows.push({ code: s.code, date: r.businessDate, sales: r.totalTaxIncludedAmount, people: r.numPeople ?? 0,
+                    weather: r.weatherCondition ?? null, target: r.salesTargetAmount ?? null,
+                    dinii: dinii.get(`${s.code}|${r.businessDate}`) ?? null });
       }
     } catch (err) {
       console.log(`  !! ${s.name} ${a}: ${String(err.message).slice(0, 120)}`);
@@ -98,7 +131,7 @@ for (const s of shops) {
   }
   process.stdout.write('.');
 }
-console.log(`\n[kpi] ${rows.length}行`);
+console.log(`\n[kpi] ${rows.length}行（うちダイニー予測あり ${rows.filter((r) => r.dinii != null).length}行）`);
 
 await fs.mkdir(path.join(ROOT, '.cache'), { recursive: true });
 await fs.writeFile(path.join(ROOT, '.cache', 'kpi.json'), JSON.stringify({ fetchedAt: new Date().toISOString(), rows }));

@@ -339,9 +339,13 @@ for d in daterange(LAST - dt.timedelta(119), LAST):
         pred, idx, why = predict(code, date)
         ppl, pplBase = predict_people(code, date)
         med = models[code]["median"]
+        dn = x.get("dinii")
         e["shops"][code] = {
             "lvlPred": round(pred / med * 100), "lvlAct": round(x["sales"] / med * 100),
             "err": round((pred - x["sales"]) / x["sales"] * 100),
+            # ダイニー自身の日別売上予測（経営管理＞売上予測）との突き合わせ
+            "dnLvl": (round(dn / med * 100) if dn else None),
+            "dnErr": (round((dn - x["sales"]) / x["sales"] * 100) if dn else None),
             "abn": (code, date) in ABNORMAL,
             "pplPred": ppl, "pplBase": pplBase, "pplAct": x["people"] or None,
             "pplErr": (round(ppl - x["people"]) if ppl and x["people"] else None),
@@ -438,12 +442,27 @@ upcoming.sort(key=lambda x: x["from"])
     "events": upcoming,
 }, ensure_ascii=False), encoding="utf-8")
 
+# うちのモデルとダイニーの予測を、同じ日だけで正面から比べる
+head = {}
+for code in models:
+    pair = [(abs(v["err"]), abs(v["dnErr"]))
+            for d in review for c, v in d["shops"].items()
+            if c == code and not v["abn"] and v["dnErr"] is not None]
+    if len(pair) >= 20:
+        head[code] = {
+            "n": len(pair),
+            "ours": round(st.median([a for a, _ in pair]), 1),
+            "dinii": round(st.median([b for _, b in pair]), 1),
+            "oursWin": round(sum(1 for a, b in pair if a < b) / len(pair) * 100),
+        }
+
 (OUT / "review.json").write_text(json.dumps({
     "generatedAt": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
     "actualThrough": LAST.isoformat(),
     "shops": meta_shops,
     "days": review,
     "live": accuracy["recent"],
+    "head": head,
 }, ensure_ascii=False), encoding="utf-8")
 
 (OUT / "accuracy.json").write_text(json.dumps(accuracy, ensure_ascii=False), encoding="utf-8")
